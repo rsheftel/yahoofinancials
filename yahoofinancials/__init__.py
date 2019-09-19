@@ -628,7 +628,7 @@ class YahooFinancials(YahooFinanceETL):
     # Public Method for the user to get the yahoo summary url
     def get_stock_summary_url(self):
         if isinstance(self.ticker, str):
-            return self._BASE_YAHOO_URL + self.ticker
+            return {self.ticker: self._BASE_YAHOO_URL + self.ticker}
         return {t: self._BASE_YAHOO_URL + t for t in self.ticker}
 
     # Public Method for the user to get stock quote data
