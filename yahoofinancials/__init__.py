@@ -138,8 +138,8 @@ class YahooFinanceETL(object):
                 now = int(time.time())
             _lastget = now
             urlopener = UrlOpener()
-            # Try to open the URL up to 10 times sleeping random time if something goes wrong
-            max_retry = 10
+            # Try to open the URL multiple times sleeping random time between tries
+            max_retry = 2
             for i in range(0, max_retry):
                 response = urlopener.open(url)
                 if response.getcode() != 200:
