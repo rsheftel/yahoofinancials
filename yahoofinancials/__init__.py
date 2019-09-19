@@ -65,6 +65,12 @@ _lastget = 0
 class ManagedException(Exception):
     pass
 
+class ParseException(ManagedException):
+    pass
+
+class URLOpenException(ManagedException):
+    pass
+
 
 # Class used to open urls for financial data
 class UrlOpener(FancyURLopener):
@@ -142,24 +148,33 @@ class YahooFinanceETL(object):
             max_retry = 2
             for i in range(0, max_retry):
                 response = urlopener.open(url)
-                if response.getcode() != 200:
-                    time.sleep(random.randrange(10, 20))
-                else:
+                if response.getcode() == 200:
                     response_content = response.read()
                     soup = BeautifulSoup(response_content, "html.parser")
                     re_script = soup.find("script", text=re.compile("root.App.main"))
-                    if re_script is not None:
-                        script = re_script.text
-                        self._cache[url] = loads(re.search("root.App.main\s+=\s+(\{.*\})", script).group(1))
-                        response.close()
+                    if re_script is None:
+                        # no point in trying this over and over again so remember the parse failure
+                        self._cache[url] = ParseException(
+                                "Parse error, server response %d bytes while opening the url: %s" % (
+                                len(response_content), url))
                         break
-                    else:
-                        time.sleep(random.randrange(10, 20))
-                if i == max_retry - 1:
-                    # Raise a custom exception if we can't get the web page within max_retry attempts
-                    raise ManagedException("Server replied with HTTP " + str(response.getcode()) +
-                                           " code while opening the url: " + str(url))
+                    script = re_script.text
+                    self._cache[url] = loads(re.search("root.App.main\s+=\s+(\{.*\})", script).group(1))
+                    response.close()
+                    break
+                print("Fail try %d, code %d from %s" % (i, response.getcode(), url))
+                if i < max_retry - 1:
+                    time.sleep(random.randrange(10, 20))
+            else:
+                print("Failed, code %d from %s" % (response.getcode(), url))
+                # Raise a custom exception if we can't get the web page within max_retry attempts
+                # exhausted all the retries so remember this failure
+                self._cache[url] = URLOpenException(
+                        "Server replied with HTTP %d code while opening the url: %s" % (
+                        response.getcode(), url))
         data = self._cache[url]
+        if isinstance(data, Exception):
+            raise data
         if tech_type == '' and statement_type != 'history':
             stores = data["context"]["dispatcher"]["stores"]["QuoteSummaryStore"]
         elif tech_type != '' and statement_type != 'history':
@@ -471,11 +486,18 @@ class YahooFinanceETL(object):
         data = {}
         for tick in self.ticker:
             try:
+                e = None
                 dict_ent = self._create_dict_ent(tick, statement_type, tech_type, report_name, hist_obj)
                 data.update(dict_ent)
-            except ManagedException:
-                print("Warning! Ticker: " + str(tick) + " error - " + str(ManagedException))
-                print("The process is still running...")
+            except URLOpenException as e:
+                print("Warning! Ticker: %s: %s" % (tick, e))
+            except ParseException as e:
+                print("Warning! Ticker: %s: %s" % (tick, e))
+            except ManagedException as e:
+                print("Warning! Ticker: %s: %s" % (tick, e))
+            finally:
+                if e:
+                    print("The process is still running...")
         return data
 
     # Public Method to get technical stock data
@@ -524,7 +546,7 @@ class YahooFinanceETL(object):
             dividend_obj = {
                 'date': div_obj['date'],
                 'formatted_date': self.format_date(int(div_obj['date'])),
-                'amount': div_obj.get('amount', None)
+                'amount': div_obj.get('amount')
             }
             re_dividends.append(dividend_obj)
         return sorted(re_dividends, key=lambda div: div['date'])
