@@ -75,7 +75,7 @@ class UrlOpener(FancyURLopener):
 class YahooFinanceETL(object):
 
     def __init__(self, ticker):
-        self.ticker = ticker.upper() if isinstance(ticker, str) else [t.upper() for t in ticker]
+        self.ticker = [ticker.upper()] if isinstance(ticker, str) else [t.upper() for t in ticker]
         self._cache = {}
 
     # Minimum interval between Yahoo Finance requests for this instance
@@ -469,18 +469,13 @@ class YahooFinanceETL(object):
     # Public Method to get stock data
     def get_stock_data(self, statement_type='income', tech_type='', report_name='', hist_obj={}):
         data = {}
-        if isinstance(self.ticker, str):
-            dict_ent = self._create_dict_ent(self.ticker, statement_type, tech_type, report_name, hist_obj)
-            data.update(dict_ent)
-        else:
-            for tick in self.ticker:
-                try:
-                    dict_ent = self._create_dict_ent(tick, statement_type, tech_type, report_name, hist_obj)
-                    data.update(dict_ent)
-                except ManagedException:
-                    print("Warning! Ticker: " + str(tick) + " error - " + str(ManagedException))
-                    print("The process is still running...")
-                    continue
+        for tick in self.ticker:
+            try:
+                dict_ent = self._create_dict_ent(tick, statement_type, tech_type, report_name, hist_obj)
+                data.update(dict_ent)
+            except ManagedException:
+                print("Warning! Ticker: " + str(tick) + " error - " + str(ManagedException))
+                print("The process is still running...")
         return data
 
     # Public Method to get technical stock data
@@ -495,47 +490,28 @@ class YahooFinanceETL(object):
         data_dict = {}
         sub_dict = {}
         data_type = raw_data['dataType']
-        if isinstance(self.ticker, str):
-            sub_dict_ent = self._get_sub_dict_ent(self.ticker, raw_data, statement_type)
+        for tick in self.ticker:
+            sub_dict_ent = self._get_sub_dict_ent(tick, raw_data, statement_type)
             sub_dict.update(sub_dict_ent)
-            dict_ent = {data_type: sub_dict}
-            data_dict.update(dict_ent)
-        else:
-            for tick in self.ticker:
-                sub_dict_ent = self._get_sub_dict_ent(tick, raw_data, statement_type)
-                sub_dict.update(sub_dict_ent)
-            dict_ent = {data_type: sub_dict}
-            data_dict.update(dict_ent)
+        dict_ent = {data_type: sub_dict}
+        data_dict.update(dict_ent)
         return data_dict
 
     # Public method to get cleaned summary and price report data
     def get_clean_data(self, raw_report_data, report_type):
         cleaned_data_dict = {}
-        if isinstance(self.ticker, str):
+        for tick in self.ticker:
             if report_type == 'earnings':
                 try:
-                    cleaned_data = self._clean_earnings_data(raw_report_data[self.ticker])
+                    cleaned_data = self._clean_earnings_data(raw_report_data[tick])
                 except:
                     cleaned_data = None
             else:
                 try:
-                    cleaned_data = self._clean_reports(raw_report_data[self.ticker])
+                    cleaned_data = self._clean_reports(raw_report_data[tick])
                 except:
                     cleaned_data = None
-            cleaned_data_dict.update({self.ticker: cleaned_data})
-        else:
-            for tick in self.ticker:
-                if report_type == 'earnings':
-                    try:
-                        cleaned_data = self._clean_earnings_data(raw_report_data[tick])
-                    except:
-                        cleaned_data = None
-                else:
-                    try:
-                        cleaned_data = self._clean_reports(raw_report_data[tick])
-                    except:
-                        cleaned_data = None
-                cleaned_data_dict.update({tick: cleaned_data})
+            cleaned_data_dict.update({tick: cleaned_data})
         return cleaned_data_dict
 
     # Private method to handle dividend data requests
@@ -556,20 +532,14 @@ class YahooFinanceETL(object):
     # Public method to get daily dividend data
     def get_stock_dividend_data(self, start, end, interval):
         interval_code = self.get_time_code(interval)
-        if isinstance(self.ticker, str):
+        re_data = {}
+        for tick in self.ticker:
             try:
-                return {self.ticker: self._handle_api_dividend_request(self.ticker, start, end, interval_code)}
+                div_data = self._handle_api_dividend_request(tick, start, end, interval_code)
+                re_data.update({tick: div_data})
             except:
-                return {self.ticker: None}
-        else:
-            re_data = {}
-            for tick in self.ticker:
-                try:
-                    div_data = self._handle_api_dividend_request(tick, start, end, interval_code)
-                    re_data.update({tick: div_data})
-                except:
-                    re_data.update({tick: None})
-            return re_data
+                re_data.update({tick: None})
+        return re_data
 
 
 # Class containing methods to create stock data extracts
@@ -627,8 +597,6 @@ class YahooFinancials(YahooFinanceETL):
 
     # Public Method for the user to get the yahoo summary url
     def get_stock_summary_url(self):
-        if isinstance(self.ticker, str):
-            return {self.ticker: self._BASE_YAHOO_URL + self.ticker}
         return {t: self._BASE_YAHOO_URL + t for t in self.ticker}
 
     # Public Method for the user to get stock quote data
@@ -645,58 +613,41 @@ class YahooFinancials(YahooFinanceETL):
 
     # Private Method for Functions needing stock_price_data
     def _stock_price_data(self, data_field):
-        if isinstance(self.ticker, str):
-            if self.get_stock_price_data()[self.ticker] is None:
-                return None
-            return self.get_stock_price_data()[self.ticker].get(data_field, None)
-        else:
-            ret_obj = {}
-            for tick in self.ticker:
-                if self.get_stock_price_data()[tick] is None:
-                    ret_obj.update({tick: None})
-                else:
-                    ret_obj.update({tick: self.get_stock_price_data()[tick].get(data_field, None)})
-            return ret_obj
+        ret_obj = {}
+        for tick in self.ticker:
+            if self.get_stock_price_data()[tick] is None:
+                ret_obj.update({tick: None})
+            else:
+                ret_obj.update({tick: self.get_stock_price_data()[tick].get(data_field)})
+        return ret_obj
 
     # Private Method for Functions needing stock_price_data
     def _stock_summary_data(self, data_field):
-        if isinstance(self.ticker, str):
-            if self.get_summary_data()[self.ticker] is None:
-                return None
-            return self.get_summary_data()[self.ticker].get(data_field, None)
-        else:
-            ret_obj = {}
-            for tick in self.ticker:
-                if self.get_summary_data()[tick] is None:
-                    ret_obj.update({tick: None})
-                else:
-                    ret_obj.update({tick: self.get_summary_data()[tick].get(data_field, None)})
-            return ret_obj
+        ret_obj = {}
+        for tick in self.ticker:
+            if self.get_summary_data()[tick] is None:
+                ret_obj.update({tick: None})
+            else:
+                ret_obj.update({tick: self.get_summary_data()[tick].get(data_field)})
+        return ret_obj
 
     # Private Method for Functions needing financial statement data
     def _financial_statement_data(self, stmt_type, stmt_code, field_name, freq):
         re_data = self.get_financial_stmts(freq, stmt_type)[stmt_code]
-        if isinstance(self.ticker, str):
+        data = {}
+        for tick in self.ticker:
             try:
-                date_key = re_data[self.ticker][0].keys()[0]
-            except (IndexError, AttributeError, TypeError):
-                date_key = list(re_data[self.ticker][0])[0]
-            data = re_data[self.ticker][0][date_key][field_name]
-        else:
-            data = {}
-            for tick in self.ticker:
+                date_key = re_data[tick][0].keys()[0]
+            except:
                 try:
-                    date_key = re_data[tick][0].keys()[0]
+                    date_key = list(re_data[tick][0].keys())[0]
                 except:
-                    try:
-                        date_key = list(re_data[tick][0].keys())[0]
-                    except:
-                        date_key = None
-                if date_key is not None:
-                    sub_data = re_data[tick][0][date_key][field_name]
-                    data.update({tick: sub_data})
-                else:
-                    data.update({tick: None})
+                    date_key = None
+            if date_key is not None:
+                sub_data = re_data[tick][0][date_key][field_name]
+                data.update({tick: sub_data})
+            else:
+                data.update({tick: None})
         return data
 
     # Public method to get daily dividend data
@@ -834,56 +785,33 @@ class YahooFinancials(YahooFinanceETL):
     def get_earnings_per_share(self):
         price_data = self.get_current_price()
         pe_ratio = self.get_pe_ratio()
-        if isinstance(self.ticker, str):
-            if price_data is not None and pe_ratio is not None:
-                return price_data / pe_ratio
+        ret_obj = {}
+        for tick in self.ticker:
+            if price_data[tick] is not None and pe_ratio[tick] is not None:
+                ret_obj.update({tick: price_data[tick] / pe_ratio[tick]})
             else:
-                return None
-        else:
-            ret_obj = {}
-            for tick in self.ticker:
-                if price_data[tick] is not None and pe_ratio[tick] is not None:
-                    ret_obj.update({tick: price_data[tick] / pe_ratio[tick]})
-                else:
-                    ret_obj.update({tick: None})
-            return ret_obj
+                ret_obj.update({tick: None})
+        return ret_obj
 
     def get_num_shares_outstanding(self, price_type='current'):
         today_low = self._stock_summary_data('dayHigh')
         today_high = self._stock_summary_data('dayLow')
         cur_market_cap = self._stock_summary_data('marketCap')
-        if isinstance(self.ticker, str):
-            if cur_market_cap is not None:
+        ret_obj = {}
+        for tick in self.ticker:
+            if cur_market_cap[tick] is not None:
                 if price_type == 'current':
                     current = self.get_current_price()
-                    if current is not None:
-                        today_average = current
+                    if current[tick] is not None:
+                        ret_obj.update({tick: cur_market_cap[tick] / current[tick]})
                     else:
-                        return None
+                        ret_obj.update({tick: None})
                 else:
-                    if today_high is not None and today_low is not None:
-                        today_average = (today_high + today_low) / 2
+                    if today_low[tick] is not None and today_high[tick] is not None:
+                        today_average = (today_high[tick] + today_low[tick]) / 2
+                        ret_obj.update({tick: cur_market_cap[tick] / today_average})
                     else:
-                        return None
-                return cur_market_cap / today_average
+                        ret_obj.update({tick: None})
             else:
-                return None
-        else:
-            ret_obj = {}
-            for tick in self.ticker:
-                if cur_market_cap[tick] is not None:
-                    if price_type == 'current':
-                        current = self.get_current_price()
-                        if current[tick] is not None:
-                            ret_obj.update({tick: cur_market_cap[tick] / current[tick]})
-                        else:
-                            ret_obj.update({tick: None})
-                    else:
-                        if today_low[tick] is not None and today_high[tick] is not None:
-                            today_average = (today_high[tick] + today_low[tick]) / 2
-                            ret_obj.update({tick: cur_market_cap[tick] / today_average})
-                        else:
-                            ret_obj.update({tick: None})
-                else:
-                    ret_obj.update({tick: None})
-            return ret_obj
+                ret_obj.update({tick: None})
+        return ret_obj
