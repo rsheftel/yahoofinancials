@@ -42,6 +42,8 @@ earnings_data = yahoo_financials.get_stock_earnings_data()
 historical_prices = yahoo_financials.get_historical_price_data('2015-01-15', '2017-10-15', 'weekly')
 """
 
+from __future__ import print_function
+
 import sys
 import calendar
 import re
@@ -57,13 +59,16 @@ except:
     from urllib.request import FancyURLopener
 
 
+# log information about failed requests - get or parse failures
+LOG_FAILURES = True
+
 # track the last get timestamp to add a minimum delay between gets - be nice!
 _lastget = 0
 
 
 # Custom Exception class to handle custom error
 class ManagedException(Exception):
-    pass
+    data = None
 
 class ParseException(ManagedException):
     pass
@@ -157,6 +162,9 @@ class YahooFinanceETL(object):
                         self._cache[url] = ParseException(
                                 "Parse error, server response %d bytes while opening the url: %s" % (
                                 len(response_content), url))
+                        self._cache[url].url = url
+                        self._cache[url].info = response.info()
+                        self._cache[url].data = response_content
                         break
                     script = re_script.text
                     self._cache[url] = loads(re.search("root.App.main\s+=\s+(\{.*\})", script).group(1))
@@ -172,6 +180,9 @@ class YahooFinanceETL(object):
                 self._cache[url] = URLOpenException(
                         "Server replied with HTTP %d code while opening the url: %s" % (
                         response.getcode(), url))
+                self._cache[url].url = url
+                self._cache[url].info = 'none'
+                self._cache[url].data = "HTTP %d" % (response.getcode(),)
         data = self._cache[url]
         if isinstance(data, Exception):
             raise data
@@ -498,6 +509,20 @@ class YahooFinanceETL(object):
             finally:
                 if e:
                     print("The process is still running...")
+                    if LOG_FAILURES:
+                        now = time.strftime('%Y%m%dT%H%M%S')
+                        sep = '-----' * 15
+                        with open('/tmp/%s-%s.log' % (now, tick), 'a+b') as f:
+                            print("Warning! Ticker: %s: %s" % (tick, e), file=f)
+                            for eurl, edata in self._cache.items():
+                                f.write('%s\nts: %s\nkey: %s\nurl: %s\ninfo: %s\ndata:\n%s\n' % (
+                                    sep, now, eurl,
+                                    edata.url if edata.data else 'none',
+                                    edata.info if edata.data else 'none',
+                                    sep
+                                ))
+                                f.write(edata.data or 'none')
+                                f.write('\n%s\n' % (sep,))
         return data
 
     # Public Method to get technical stock data
