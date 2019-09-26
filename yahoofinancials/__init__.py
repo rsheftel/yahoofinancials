@@ -170,11 +170,11 @@ class YahooFinanceETL(object):
                     self._cache[url] = loads(re.search("root.App.main\s+=\s+(\{.*\})", script).group(1))
                     response.close()
                     break
-                print("Fail try %d, code %d from %s" % (i, response.getcode(), url))
+                print("Fail try %d, code %d from %s" % (i, response.getcode(), url), file=sys.stderr)
                 if i < max_retry - 1:
                     time.sleep(random.randrange(10, 20))
             else:
-                print("Failed, code %d from %s" % (response.getcode(), url))
+                print("Failed, code %d from %s" % (response.getcode(), url), file=sys.stderr)
                 # Raise a custom exception if we can't get the web page within max_retry attempts
                 # exhausted all the retries so remember this failure
                 self._cache[url] = URLOpenException(
@@ -501,14 +501,14 @@ class YahooFinanceETL(object):
                 dict_ent = self._create_dict_ent(tick, statement_type, tech_type, report_name, hist_obj)
                 data.update(dict_ent)
             except URLOpenException as e:
-                print("Warning! Ticker: %s: %s" % (tick, e))
+                print("Warning! Ticker: %s: %s" % (tick, e), file=sys.stderr)
             except ParseException as e:
-                print("Warning! Ticker: %s: %s" % (tick, e))
+                print("Warning! Ticker: %s: %s" % (tick, e), file=sys.stderr)
             except ManagedException as e:
-                print("Warning! Ticker: %s: %s" % (tick, e))
+                print("Warning! Ticker: %s: %s" % (tick, e), file=sys.stderr)
             finally:
                 if e:
-                    print("The process is still running...")
+                    print("The process is still running...", file=sys.stderr)
                     if LOG_FAILURES:
                         now = time.strftime('%Y%m%dT%H%M%S')
                         sep = '-----' * 15
