@@ -53,6 +53,7 @@ from bs4 import BeautifulSoup
 import datetime
 import pytz
 import random
+from subprocess import check_output, CalledProcessError
 try:
     from urllib import FancyURLopener
 except:
@@ -69,6 +70,9 @@ from zlib import decompress as zlibdecompress
 
 # log information about failed requests - get or parse failures
 LOG_FAILURES = True
+
+# print how much debug output
+DEBUG = 0
 
 # add Accept-Encoding header for gzip (and deflate)
 # yahoo will sometimes send gzip even without the header!
@@ -93,6 +97,54 @@ class URLOpenException(ManagedException):
 # Class used to open urls for financial data
 class UrlOpener(FancyURLopener):
     version = 'Mozilla/5.0 (Windows; U; Windows NT 5.1; it; rv:1.8.1.11) Gecko/20071127 Firefox/2.0.0.11'
+
+
+def _decode_response(response):
+    try:
+        content = None
+        encoding = response.info().get("Content-Encoding")
+        if encoding in ('gzip', 'x-gzip'):
+            if not ACCEPT_GZIP: print('gzip!', file=sys.stderr)
+            content = gzipdecompress(response.read())
+        elif encoding == 'deflate':
+            print('deflate(not seen from yahoo)...', file=sys.stderr)
+            content = zlibdecompress(response.read())
+        elif encoding:
+            print('encoding???', encoding, file=sys.stderr)
+    except Exception as e:
+        print("response decoding exception:", str(e), file=sys.stderr)
+    finally:
+        if content is None:
+            content = response.read()
+    return content
+
+def fetch_url_urlopener(url):
+    urlopener = UrlOpener()
+    if ACCEPT_GZIP: urlopener.addheader('Accept-Encoding', 'gzip,deflate')
+    response = urlopener.open(url)
+    rescode = response.getcode()
+    response_content = _decode_response(response)
+    if DEBUG and rescode != 200:
+        print("fail: %d\n url: %s\ninfo: %s\nbody: %s\n" % (
+            rescode,
+            url,
+            response.info(),
+            response_content,
+        ), file=sys.stderr)
+    response.close()
+    return rescode, response_content
+
+def fetch_url_curl(url):
+    try:
+        response_content = check_output(['curl', '-L', '-s', url])
+        rescode = 200
+    except CalledProcessError as e:
+        response_content = None
+        rescode = 401
+        if DEBUG: print('fail %d: %s' % (e.returncode, e.output), file=sys.stderr)
+    return rescode, response_content
+
+fetch_url = fetch_url_urlopener
 
 
 # Class containing Yahoo Finance ETL Functionality
@@ -152,27 +204,6 @@ class YahooFinanceETL(object):
         date_utc = date_eastern.astimezone(utc)
         return date_utc.strftime('%Y-%m-%d %H:%M:%S %Z%z')
 
-    # Private Static method to decode encoded pages
-    @staticmethod
-    def _decode_response(response):
-        try:
-            content = None
-            encoding = response.info().get("Content-Encoding")
-            if encoding in ('gzip', 'x-gzip'):
-                if not ACCEPT_GZIP: print('gzip!', file=sys.stderr)
-                content = gzipdecompress(response.read())
-            elif encoding == 'deflate':
-                print('deflate(not seen from yahoo)...', file=sys.stderr)
-                content = zlibdecompress(response.read())
-            elif encoding:
-                print('encoding???', encoding, file=sys.stderr)
-        except Exception as e:
-            print("response decoding exception:", str(e), file=sys.stderr)
-        finally:
-            if content is None:
-                content = response.read()
-        return content
-
     # Private method to scrape data from yahoo finance
     def _scrape_data(self, url, tech_type, statement_type):
         global _lastget
@@ -182,14 +213,11 @@ class YahooFinanceETL(object):
                 time.sleep(self._MIN_INTERVAL - (now - _lastget) + 1)
                 now = int(time.time())
             _lastget = now
-            urlopener = UrlOpener()
-            if ACCEPT_GZIP: urlopener.addheader('Accept-Encoding', 'gzip,deflate')
             # Try to open the URL multiple times sleeping random time between tries
             max_retry = 2
             for i in range(0, max_retry):
-                response = urlopener.open(url)
-                if response.getcode() == 200:
-                    response_content = self._decode_response(response)
+                rescode, response_content = fetch_url(url)
+                if rescode == 200:
                     soup = BeautifulSoup(response_content, "html.parser")
                     re_script = soup.find("script", text=re.compile("root.App.main"))
                     if re_script is None:
@@ -198,26 +226,25 @@ class YahooFinanceETL(object):
                                 "Parse error, server response %d bytes while opening the url: %s" % (
                                 len(response_content), url))
                         self._cache[url].url = url
-                        self._cache[url].info = response.info()
+                        self._cache[url].info = 'none-ok' #response.info()
                         self._cache[url].data = response_content
                         break
                     script = re_script.text
                     self._cache[url] = loads(re.search("root.App.main\s+=\s+(\{.*\})", script).group(1))
-                    response.close()
                     break
-                print("Fail try %d, code %d from %s" % (i, response.getcode(), url), file=sys.stderr)
+                print("Fail try %d, code %d from %s" % (i, rescode, url), file=sys.stderr)
                 if i < max_retry - 1:
                     time.sleep(random.randrange(10, 20))
             else:
-                print("Failed, code %d from %s" % (response.getcode(), url), file=sys.stderr)
+                print("Failed, code %d from %s" % (rescode, url), file=sys.stderr)
                 # Raise a custom exception if we can't get the web page within max_retry attempts
                 # exhausted all the retries so remember this failure
                 self._cache[url] = URLOpenException(
                         "Server replied with HTTP %d code while opening the url: %s" % (
-                        response.getcode(), url))
+                        rescode, url))
                 self._cache[url].url = url
                 self._cache[url].info = 'none'
-                self._cache[url].data = "HTTP %d" % (response.getcode(),)
+                self._cache[url].data = "HTTP %d" % (rescode,)
         data = self._cache[url]
         if isinstance(data, Exception):
             raise data
@@ -380,12 +407,8 @@ class YahooFinanceETL(object):
 
     # Private Method to get financial data via API Call
     def _get_api_data(self, api_url, tries=0):
-        urlopener = UrlOpener()
-        if ACCEPT_GZIP: urlopener.addheader('Accept-Encoding', 'gzip,deflate')
-        response = urlopener.open(api_url)
-        if response.getcode() == 200:
-            res_content = response.read()
-            response.close()
+        rescode, res_content = fetch_url(api_url)
+        if rescode == 200:
             if sys.version_info < (3, 0):
                 return loads(res_content)
             return loads(res_content.decode('utf-8'))
