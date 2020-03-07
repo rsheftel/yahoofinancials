@@ -104,16 +104,16 @@ class TestModule(TestCase):
     # Extra Module Methods Test
     def test_yf_module_methods(self):
         # Stocks
-        if isinstance(self.test_yf_stock_single.get_current_price(), float):
+        if isinstance(self.test_yf_stock_single.get_current_price()['C'], float):
             self.assertEqual(True, True)
         else:
             self.assertEqual(False, True)
-        if isinstance(self.test_yf_stock_single.get_net_income(), int):
+        if isinstance(self.test_yf_stock_single.get_net_income()['C'], int):
             self.assertEqual(True, True)
         else:
             self.assertEqual(False, True)
         # Treasuries
-        if isinstance(self.test_yf_treasuries_single.get_current_price(), float):
+        if isinstance(self.test_yf_treasuries_single.get_current_price()['^IRX'], float):
             self.assertEqual(True, True)
         else:
             self.assertEqual(False, True)
