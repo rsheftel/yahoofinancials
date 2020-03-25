@@ -83,6 +83,35 @@ ACCEPT_GZIP = True
 _lastget = 0
 
 
+if DEBUG:
+    import inspect
+    import traceback
+
+    _tracefargs = []
+    def trace(*args):
+        fname = traceback.extract_stack(None, 2)[0][2]
+        if DEBUG > 9:
+            fargnames, _, _, flocals = inspect.getargvalues(inspect.currentframe().f_back)
+            fargs = ['%s=%s' % (a, flocals[a]) for a in fargnames]
+            if fargs == _tracefargs:
+                fargs = ['...']
+            else:
+                del _tracefargs[:]
+                _tracefargs.extend(fargs)
+            print("%s(%s): %s" % (
+                fname,
+                ', '.join(fargs),
+                '; '.join(args),
+                ), file=sys.stderr)
+        elif DEBUG > 1:
+            print("%s: %s" % (
+                fname,
+                '; '.join(args),
+                ), file=sys.stderr)
+else:
+    def trace(*args): pass
+
+
 # Custom Exception class to handle custom error
 class ManagedException(Exception):
     data = None
@@ -119,6 +148,7 @@ def _decode_response(response):
     return content
 
 def fetch_url_urlopener(url):
+    trace()
     urlopener = UrlOpener()
     if ACCEPT_GZIP: urlopener.addheader('Accept-Encoding', 'gzip,deflate')
     response = urlopener.open(url)
@@ -218,6 +248,7 @@ class YahooFinanceETL(object):
             for i in range(0, max_retry):
                 rescode, response_content = fetch_url(url)
                 if rescode == 200:
+                    trace('rescode=%s' % rescode)
                     soup = BeautifulSoup(response_content, "html.parser")
                     re_script = soup.find("script", text=re.compile("root.App.main"))
                     if re_script is None:
@@ -231,6 +262,7 @@ class YahooFinanceETL(object):
                         break
                     script = re_script.text
                     self._cache[url] = loads(re.search("root.App.main\s+=\s+(\{.*\})", script).group(1))
+                    trace('cached: %s' % (self._cache[url],))
                     break
                 print("Fail try %d, code %d from %s" % (i, rescode, url), file=sys.stderr)
                 if i < max_retry - 1:
@@ -253,6 +285,7 @@ class YahooFinanceETL(object):
         except Exception as e:
             print("Failed, missing stores in %s bytes from url: %s" % (storekey, len(str(data)), url), file=sys.stderr)
             raise
+        trace('stores: %s' % (stores,))
         return stores
 
     # Private static method to determine if a numerical value is in the data object being cleaned
