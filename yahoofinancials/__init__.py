@@ -205,7 +205,7 @@ class YahooFinanceETL(object):
         return date_utc.strftime('%Y-%m-%d %H:%M:%S %Z%z')
 
     # Private method to scrape data from yahoo finance
-    def _scrape_data(self, url, tech_type, statement_type):
+    def _scrape_data(self, url):
         global _lastget
         if not self._cache.get(url):
             now = int(time.time())
@@ -248,12 +248,11 @@ class YahooFinanceETL(object):
         data = self._cache[url]
         if isinstance(data, Exception):
             raise data
-        if tech_type == '' and statement_type != 'history':
-            stores = data["context"]["dispatcher"]["stores"]["QuoteSummaryStore"]
-        elif tech_type != '' and statement_type != 'history':
-            stores = data["context"]["dispatcher"]["stores"]["QuoteSummaryStore"][tech_type]
-        else:
-            stores = data["context"]["dispatcher"]["stores"]["HistoricalPriceStore"]
+        try:
+            stores = data["context"]["dispatcher"]["stores"]
+        except Exception as e:
+            print("Failed, missing stores in %s bytes from url: %s" % (storekey, len(str(data)), url), file=sys.stderr)
+            raise
         return stores
 
     # Private static method to determine if a numerical value is in the data object being cleaned
@@ -477,32 +476,31 @@ class YahooFinanceETL(object):
 
     # Private Method to take scrapped data and build a data dictionary with
     def _create_dict_ent(self, up_ticker, statement_type, tech_type, report_name, hist_obj):
-        YAHOO_URL = self._BASE_YAHOO_URL + up_ticker + '/' + self.YAHOO_FINANCIAL_TYPES[statement_type][0] + '?p=' +\
-                    up_ticker
-        if tech_type == '' and statement_type != 'history':
-            try:
-                re_data = self._scrape_data(YAHOO_URL, tech_type, statement_type)
-                dict_ent = {up_ticker: re_data[u'' + report_name], 'dataType': report_name}
-            except KeyError:
-                re_data = None
-                dict_ent = {up_ticker: re_data, 'dataType': report_name}
-        elif tech_type != '' and statement_type != 'history':
-            try:
-                re_data = self._scrape_data(YAHOO_URL, tech_type, statement_type)
-            except KeyError:
-                re_data = None
-            dict_ent = {up_ticker: re_data}
-        else:
+        if statement_type == 'history':
             YAHOO_URL = self._build_historical_url(up_ticker, hist_obj)
             try:
                 cleaned_re_data = self._recursive_api_request(hist_obj, up_ticker)
             except KeyError:
                 try:
-                    re_data = self._scrape_data(YAHOO_URL, tech_type, statement_type)
+                    re_data = self._scrape_data(YAHOO_URL)["HistoricalPriceStore"]
                     cleaned_re_data = self._clean_historical_data(re_data)
                 except KeyError:
                     cleaned_re_data = None
             dict_ent = {up_ticker: cleaned_re_data}
+        else:
+            YAHOO_URL = self._BASE_YAHOO_URL + up_ticker + '/' +\
+                self.YAHOO_FINANCIAL_TYPES[statement_type][0] + '?p=' + up_ticker
+            try:
+                re_data = self._scrape_data(YAHOO_URL)["QuoteSummaryStore"]
+            except KeyError:
+                re_data = None
+            try:
+                if tech_type:
+                    dict_ent = {up_ticker: re_data[tech_type]}
+                else:
+                    dict_ent = {up_ticker: re_data[u'' + report_name], 'dataType': report_name}
+            except KeyError:
+                dict_ent = {up_ticker: re_data, 'dataType': report_name}
         return dict_ent
 
     # Private method to return the stmt_id for the reformat_process
@@ -571,7 +569,7 @@ class YahooFinanceETL(object):
                     if LOG_FAILURES:
                         now = time.strftime('%Y%m%dT%H%M%S')
                         sep = '-----' * 15
-                        with open('/tmp/%s-%s.log' % (now, tick), 'a+b') as f:
+                        with open('/tmp/%s-%s.log' % (now[:8], tick), 'a+b') as f:
                             print("Warning! Ticker: %s: %s" % (tick, e), file=f)
                             for eurl, edata in self._cache.items():
                                 f.write('%s\nts: %s\nkey: %s\nurl: %s\ninfo: %s\ndata:\n%s\n' % (
