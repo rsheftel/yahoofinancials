@@ -261,6 +261,9 @@ class YahooFinanceETL(object):
                         self._cache[url].data = response_content
                         break
                     script = re_script.text
+                    # bs4 4.9.0 changed so text from scripts is no longer considered text
+                    if not script:
+                        script = re_script.string
                     self._cache[url] = loads(re.search("root.App.main\s+=\s+(\{.*\})", script).group(1))
                     trace('cached: %s' % (self._cache[url],))
                     break
