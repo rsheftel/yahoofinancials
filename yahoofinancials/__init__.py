@@ -54,10 +54,7 @@ import datetime
 import pytz
 import random
 from subprocess import check_output, CalledProcessError
-try:
-    from urllib import FancyURLopener
-except:
-    from urllib.request import FancyURLopener
+import requests
 try:
     from gzip import decompress as gzipdecompress
 except ImportError:
@@ -123,46 +120,6 @@ class URLOpenException(ManagedException):
     pass
 
 
-# Class used to open urls for financial data
-class UrlOpener(FancyURLopener):
-    version = 'w3m/0.5.3+git20180125'
-
-
-def _decode_response(response):
-    try:
-        content = None
-        encoding = response.info().get("Content-Encoding")
-        if encoding in ('gzip', 'x-gzip'):
-            if not ACCEPT_GZIP: print('gzip!', file=sys.stderr)
-            content = gzipdecompress(response.read())
-        elif encoding == 'deflate':
-            print('deflate(not seen from yahoo)...', file=sys.stderr)
-            content = zlibdecompress(response.read())
-        elif encoding:
-            print('encoding???', encoding, file=sys.stderr)
-    except Exception as e:
-        print("response decoding exception:", str(e), file=sys.stderr)
-    finally:
-        if content is None:
-            content = response.read()
-    return content
-
-def fetch_url_urlopener(url):
-    trace()
-    urlopener = UrlOpener()
-    if ACCEPT_GZIP: urlopener.addheader('Accept-Encoding', 'gzip,deflate')
-    response = urlopener.open(url)
-    rescode = response.getcode()
-    response_content = _decode_response(response)
-    if DEBUG and rescode != 200:
-        print("fail: %d\n url: %s\ninfo: %s\nbody: %s\n" % (
-            rescode,
-            url,
-            response.info(),
-            response_content,
-        ), file=sys.stderr)
-    response.close()
-    return rescode, response_content
 
 def fetch_url_curl(url):
     try:
@@ -174,7 +131,12 @@ def fetch_url_curl(url):
         if DEBUG: print('fail %d: %s' % (e.returncode, e.output), file=sys.stderr)
     return rescode, response_content
 
-fetch_url = fetch_url_urlopener
+def fetch_url_requests(url):
+    trace()
+    r = requests.get(url, timeout=10)
+    return r.status_code, r.text
+
+fetch_url = fetch_url_requests
 
 
 # Class containing Yahoo Finance ETL Functionality
@@ -286,7 +248,7 @@ class YahooFinanceETL(object):
         try:
             stores = data["context"]["dispatcher"]["stores"]
         except Exception as e:
-            print("Failed, missing stores in %s bytes from url: %s" % (storekey, len(str(data)), url), file=sys.stderr)
+            print("Failed, missing stores in %s bytes from '%s': %s" % (storekey, len(str(data)), url, e), file=sys.stderr)
             raise
         trace('stores: %s' % (stores,))
         return stores
